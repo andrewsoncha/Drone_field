@@ -1,90 +1,106 @@
 import random
 import numpy as np
 from collections import deque
-import tensorflow as tf
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 import os
 """
 This file contains the code for our implementation of the DDRQN architecture. This network is used for
 the search agent's predictions. This code does not need to be changed. To access its predictions, use the
 'act' function
+
+Ported Tensorflow v1 to pytorch. -- Andrew Chang, Feb 25th
 """
 
-class DDRQNModel:
-    def __init__(self, state_size, action_size, scope='DQN_model', sess=None, target=None):
+class DDRQNModel(nn.Module):
+    def __init__(self, state_size, action_size, target=None):
         self.state_size = state_size
         self.action_size = action_size
-        self.learning_rate = 0.001
-        self.sess = sess or tf.get_default_session()
+        self.target_mode = (target is not None) #When target is None, do not receive local map \
+                # If not, receive local map.
 
-        with tf.variable_scope(scope):
-            self.local_map = tf.placeholder(shape=[None, 5, 625], dtype=tf.float32, name='local_map')
+# Possible Model Improvement area: change the local map model into a CNN or something else with spatial encoding. --Andrew Chang, Feb 25 2026
+        if not self.target_mode:
+            self.lm_dense1 = nn.Linear(625, 100) # lm_dense1, lm_dense2 receives local map
+            self.lm_dense2 = nn.Linear(100, 100)
 
-            self.dense1 = tf.contrib.layers.fully_connected(inputs=self.local_map, num_outputs=100)
-            self.dense2 = tf.contrib.layers.fully_connected(inputs=self.dense1, num_outputs=100)
+        # If self.target_mode is True, input state is (batch, state_size).
+        # If self.target_mode is False, state is (batch, 5, state_size).
+        self.state_dense1 = nn.Linear(state_size, 64)
+        self.state_dense2 = nn.Linear(64, 10)
 
-            if target is not None:
-                self.state = tf.placeholder(shape=[None, self.state_size],
-                                            dtype=tf.float32, name='state')
-            else:
-                self.state = tf.placeholder(shape=[None, 5, self.state_size],
-                                            dtype=tf.float32, name='state')
-
-            self.dense3 = tf.contrib.layers.fully_connected(inputs=self.state, num_outputs=64)
-            self.dense4 = tf.contrib.layers.fully_connected(inputs=self.dense3, num_outputs=10)
-
-            if target is not None:
-                self.final_state = tf.identity(self.dense4)
-                self.output = tf.contrib.layers.fully_connected(inputs=self.final_state, num_outputs=self.action_size, activation_fn=None)
-            else:
-                self.final_state = tf.concat([self.dense4, self.dense2], axis=2)
-
-                self.rnn_cell = tf.contrib.rnn.BasicLSTMCell(110)
-                self.initial_state = self.rnn_cell.zero_state(batch_size=1, dtype=tf.float32)
-                self.rnn_outputs, state = tf.nn.dynamic_rnn(self.rnn_cell, self.final_state,
-                                                            initial_state=self.initial_state)
-                self.rnn_outputs = tf.reshape(self.rnn_outputs, [-1, 5 * 110])
-
-                self.output = tf.contrib.layers.fully_connected(inputs=self.rnn_outputs, num_outputs=self.action_size, activation_fn=None)
-
-            self.target = tf.placeholder(shape=[None, self.action_size], dtype=tf.float32, name='target')
-
-
-            self.loss = tf.squared_difference(self.output, self.target)
-
-            self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate)
-            self.train_op = self.optimizer.minimize(self.loss)
-
-            self.saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=scope), max_to_keep=10)
-
-            # if self.args.test:
-            # self.saver.restore(sess, self.args.weight_dir + policy_weight)
-
-
-    def predict(self, state, local_maps=None, sess=None):
-        sess = sess or tf.get_default_session() or self.sess
-        if local_maps is not None:
-            action_values = sess.run(self.output, {self.state: state, self.local_map:local_maps})
+        if self.target_mode:
+            self.output = nn.Linear(10, self.action_size)
         else:
-            action_values = sess.run(self.output, {self.state: state})
+            self.rnn_cell = nn.LSTM(110, 110, batch_first=True)
+            self.output = nn.Linear(5*110, self.action_size)
 
-        #print(action_values)
+        self.optimizer = optimizer.Adam(self.parameters(), lr=0.001)
 
-        return action_values
+    def forward(self, state, local_maps=None):
+        """
+        state:
+            target_mode=False -> (batch, 5, state_size)
+            target_mode=True  -> (batch, state_size)
 
-    def fit(self, state, target, local_maps=None, sess=None):
-        sess = sess or tf.get_default_session() or self.sess
+        local_map:
+            (batch, 5, 625)
+        """
+
+        if self.target_mode:
+            x = F.relu(self.state_dense1(state))
+            x = F.relu(self.state_dense2(x))
+            return self.output(x)
+
+        # Possible Model Improvement area: change the local map model into a CNN or something else with spatial encoding. --Andrew Chang, Feb 25 2026
+        lm = F.relu(self.lm_dense1(state))
+        lm = F.relu(self.lm_dense2(lm))
+
+        s = F.relu(self.state_dense1(state))
+        s = F.relu(self.state_dense2(s))
+
+        x = torch.concat((s, lm), dim=2) # (batch, 5, 110)
+
+        rnn_out, (h_n, c_n) = self.rnn_cell(x)
+        rnn_out = rnn_out.reshape(rnn_out.size(0), -1)
+
+        return self.output(rnn_out)
+
+    def predict(self, state, local_maps=None):
+        self.eval()
+        with torch.no_grad():
+            state = torch.FloatTensor(state).to(self.device)
+            if local_map is not None:
+                local_map = torch.FloatTensor(local_map).to(self.device)
+                q_values = self.forward(state, local_map)
+            else:
+                q_values = self.forward(state)
+        return q_values.cpu().numpy()
+
+    def fit(self, state, target, local_maps=None):
+        self.train()
+        state = torch.FloatTensor(state).to(self.device)
+        target = torch.FloatTensor(target).to(self.device)
+
         if local_maps is not None:
-            feed_dict = {self.state: state, self.target: target, self.local_map: local_maps}
+            local_map = torch.FloatTensor(local_map).to(self.device)
+            output = self.forward(state, local_map)
         else:
-            feed_dict = {self.state: state, self.target: target}
+            output = self.forward(state)
 
-        _, loss = sess.run([self.train_op, self.loss], feed_dict)
-        return loss
+        loss = F.mse_loss(output, target)
 
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
 
-    def load_weights(self, name, sess):
-        self.saver.restore(sess, name)
+        return loss.item()
 
+    def load_weights(self, name):
+        torch.save(self.state_dict(), name)
 
     def save_weights(self, name, sess, episode=None):
         self.saver.save(sess, name, global_step=episode)
@@ -93,8 +109,8 @@ class DDRQNModel:
 class DDRQNAgent:
     def __init__(self, state_size, action_size, scope, session, target=None):
         self.scope = scope
-        self.model = DDRQNModel(state_size, action_size, scope + "_model", session, target)
-        self.target_model = DDRQNModel(state_size, action_size, scope + "_target", session, target)
+        self.model = DDRQNModel(state_size, action_size, target)
+        self.target_model = DDRQNModel(state_size, action_size, target)
         self.action_size = action_size
         self.memory = deque(maxlen=2000)
         self.gamma = 0.95  # discount rate
@@ -102,8 +118,6 @@ class DDRQNAgent:
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.99
         self.sess = session
-
-        self.sess.run(tf.global_variables_initializer())
 
         self.load_weight_dir = "Weights/"
         self.save_weight_dir = "Weights_full/"
@@ -113,11 +127,6 @@ class DDRQNAgent:
 
         self.update_target_model()
 
-
-
-
-
-
         if target is None:
             self.isTarget = False
         else:
@@ -125,15 +134,7 @@ class DDRQNAgent:
 
 
     def update_target_model(self):
-        """
-        trainable = tf.trainable_variables()
-        for i in range(len(trainable) // 2):
-            assign_op = trainable[i+len(trainable)//2].assign(trainable[i])
-            self.sess.run(assign_op)
-        """
-        q_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.scope+"_model")
-        q_target_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.scope+"_target")
-        self.sess.run([v_t.assign(v) for v_t, v in zip(q_target_vars, q_vars)])
+        self.target_model.load_state_dict(self.model.state_dict())
 
     def replay(self, batch_size):
         minibatch = random.sample(self.memory, batch_size)
