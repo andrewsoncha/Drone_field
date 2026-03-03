@@ -36,20 +36,19 @@ def test_full_model(target_cost=False, search_weights=None, trace_weights=None, 
     trace = Trace(visited, map_obj)
     target = SelectTarget(visited)
     action_size = search.num_actions
-    sess = tf.Session()
-    searching_agent = DDRQNAgent(search.vision_size+6, action_size, 'Search', sess)
+    searching_agent = DDRQNAgent(search.vision_size+6, action_size)
 
 
-    tracing_agent = A2CAgent(trace.vision_size + 4, action_size, 'Trace', sess)
+    tracing_agent = A2CAgent(trace.vision_size + 4, action_size)
 
-    #initialize tensorflow parameters to be loaded
-    sess.run(tf.global_variables_initializer())
 
     #These functions load our saved weights in the folder 'Weights'
+    '''
     if search_weights is not None:
         searching_agent.load(search_weights + '_model', search_weights + '_target')
     if trace_weights is not None:
         tracing_agent.load(trace_weights + '_policy', trace_weights + '_value')
+    '''
 
 
     done = False

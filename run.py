@@ -1,7 +1,5 @@
 import argparse
 from Testing.full_testing import *
-tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

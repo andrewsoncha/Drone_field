@@ -16,24 +16,26 @@ Ported Tensorflow v1 to pytorch. -- Andrew Chang, Feb 25th
 """
 
 class PolicyEstimator_RNN(nn.Module):
-    def __init__(self, state_size, action_size, target=None):
+    def __init__(self, state_size, action_size, target=None, device='cpu'):
+        super(PolicyEstimator_RNN, self).__init__()
         self.state_size = state_size
         self.action_size = action_size
         self.target_mode = (target is not None)
+        self.device = device
 
         #local_map shape: (None, 5, 625)
         self.lm_dense1 = nn.Linear(625*5, 100)
         self.lm_dense2 = nn.Linear(100, 100)
 
         #state_shape: (None, 5, state_size)
-        self.state_dense1 = nn.Linear(self.state, 64)
+        self.state_dense1 = nn.Linear(self.state_size, 64)
         self.state_dense2 = nn.Linear(64, 10)
 
-        sefl.rnn_cell = nn.LSTM(110, 100, batch_size=False)
+        self.rnn_cell = nn.LSTM(110, 100)
 
         self.output = nn.Linear(5*110, self.action_size)
 
-        self.optimizer = optimizer.Adam(self.parameters(), lr=0.001)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
 
     def forward(self, state, local_maps=None):
         """
@@ -100,25 +102,27 @@ class PolicyEstimator_RNN(nn.Module):
 
 
 
-class ValueEstimator_RNN:
-    def __init__(self, state_size, action_size, target=None):
+class ValueEstimator_RNN(nn.Module):
+    def __init__(self, state_size, action_size, target=None, device='cpu'):
+        super(ValueEstimator_RNN, self).__init__()
         self.state_size = state_size
         self.action_size = action_size
         self.target_mode = (target is not None)
+        self.device = device
 
         #local_map shape: (None, 5, 625)
         self.lm_dense1 = nn.Linear(625*5, 100)
         self.lm_dense2 = nn.Linear(100, 100)
 
         #state_shape: (None, 5, state_size)
-        self.state_dense1 = nn.Linear(self.state, 64)
+        self.state_dense1 = nn.Linear(self.state_size, 64)
         self.state_dense2 = nn.Linear(64, 10)
 
-        sefl.rnn_cell = nn.LSTM(110, 100, batch_size=False)
+        self.rnn_cell = nn.LSTM(110, 100)
 
         self.output = nn.Linear(5*110, 1)
 
-        self.optimizer = optimizer.Adam(self.parameters(), lr=0.001)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
 
     def forward(self, states, local_maps):
         """
@@ -187,7 +191,6 @@ class A2CAgent:
         self.state_size = state_size
         self.policy = PolicyEstimator_RNN(state_size, action_size, target)
         self.value = ValueEstimator_RNN(state_size, action_size, target)
-        self.sess = session
         self.memory = deque(maxlen=2000)
 
     def act(self, state, local_map):
@@ -202,8 +205,12 @@ class A2CAgent:
         self.policy.update(states, pol_target, action, local_maps)
         self.value.update(states, val_target, local_maps)
 
-    def load(self, name, name2):# Why are there two names???
+    def load(self, name, name2):
+        # Why are there two names???
         #TODO: Actually implement this method.
+        print('A2CAgent load called! This method is not actually defined yet.')
 
-    def save(self, name, name2, episode=None):# Why are there two names???
+    def save(self, name, name2, episode=None):
+        # Why are there two names???
         #TODO: Actually implement this method.
+        print('A2CAgent save called! This method is not actually defined yet.')

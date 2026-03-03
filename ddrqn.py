@@ -16,9 +16,11 @@ Ported Tensorflow v1 to pytorch. -- Andrew Chang, Feb 25th
 """
 
 class DDRQNModel(nn.Module):
-    def __init__(self, state_size, action_size, target=None):
+    def __init__(self, state_size, action_size, target=None, device='cpu'):
+        super(DDRQNModel, self).__init__()
         self.state_size = state_size
         self.action_size = action_size
+        self.device = device
         self.target_mode = (target is not None) #When target is None, do not receive local map \
                 # If not, receive local map.
 
@@ -38,7 +40,7 @@ class DDRQNModel(nn.Module):
             self.rnn_cell = nn.LSTM(110, 110, batch_first=True)
             self.output = nn.Linear(5*110, self.action_size)
 
-        self.optimizer = optimizer.Adam(self.parameters(), lr=0.001)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
 
     def forward(self, state, local_maps=None):
         """
@@ -101,15 +103,15 @@ class DDRQNModel(nn.Module):
         return loss.item()
 
     def load_weights(self, name):
-        torch.save(self.state_dict(), name)
+        #TODO Actually implement this method
+        print('DDRQN Model load_weights called! This method is not yet implemented')
 
-    def save_weights(self, name, sess, episode=None):
-        self.saver.save(sess, name, global_step=episode)
+    def save_weights(self, name, episode=None):
+        torch.save(self.state_dict(), name)
 
 
 class DDRQNAgent:
-    def __init__(self, state_size, action_size, scope, session, target=None):
-        self.scope = scope
+    def __init__(self, state_size, action_size, target=None):
         self.model = DDRQNModel(state_size, action_size, target)
         self.target_model = DDRQNModel(state_size, action_size, target)
         self.action_size = action_size
@@ -118,7 +120,6 @@ class DDRQNAgent:
         self.epsilon = 0.01  # exploration rate
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.99
-        self.sess = session
 
         self.load_weight_dir = "Weights/"
         self.save_weight_dir = "Weights_full/"

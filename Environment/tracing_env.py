@@ -160,7 +160,7 @@ class Trace(Env):
         :return: local_map
         """
         local_map = deepcopy(self.map_obj.map[self.local_map_lower_row:self.local_map_upper_row + 1,
-                             self.local_map_lower_col:self.local_map_upper_col + 1]
+                             self.local_map_lower_col:self.local_map_upper_col + 1])
         return local_map
 
     def next_local_map(self):
