@@ -50,7 +50,7 @@ class PolicyEstimator_RNN(nn.Module):
             return self.output(x)
 
         # Possible Model Improvement area: change the local map model into a CNN or something else with spatial encoding. --Andrew Chang, Feb 25 2026
-        
+
         flattened_lm = torch.flatten(local_maps)
         lm = F.relu(self.lm_dense1(flattened_lm))
         lm = F.relu(self.lm_dense2(lm))
@@ -135,7 +135,7 @@ class ValueEstimator_RNN:
             return self.output(x)
 
         # Possible Model Improvement area: change the local map model into a CNN or something else with spatial encoding. --Andrew Chang, Feb 25 2026
-        
+
         flattened_lm = torch.flatten(local_maps)
         lm = F.relu(self.lm_dense1(flattened_lm))
         lm = F.relu(self.lm_dense2(lm))
