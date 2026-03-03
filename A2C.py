@@ -1,6 +1,9 @@
 import numpy as np
 from collections import deque
-import tensorflow as tf
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 """
 This file contains the code for our A2C Network, which makes decisions for the
 tracing agent. It takes in the state information produced in the step function of
@@ -8,159 +11,184 @@ tracing_env, and outputs probabilities for 4 actions (up, right, down, left)
 
 This code does not need to be modified, and its predictions can be accessed via
 the 'act' function
+
+Ported Tensorflow v1 to pytorch. -- Andrew Chang, Feb 25th
 """
 
-class PolicyEstimator_RNN:
-    def __init__(self, state_size, action_size,  scope='RNN_model_policy', sess=None, target=None):
+class PolicyEstimator_RNN(nn.Module):
+    def __init__(self, state_size, action_size, target=None):
         self.state_size = state_size
         self.action_size = action_size
-        self.sess = sess or tf.get_default_session()
+        self.target_mode = (target is not None)
 
-        with tf.variable_scope(scope):
-            self.local_map = tf.placeholder(shape=[None, 5, 625], dtype=tf.float32, name='local_map')
+        #local_map shape: (None, 5, 625)
+        self.lm_dense1 = nn.Linear(625*5, 100)
+        self.lm_dense2 = nn.Linear(100, 100)
 
-            self.dense1 = tf.contrib.layers.fully_connected(inputs=self.local_map, num_outputs=100)
-            self.dense2 = tf.contrib.layers.fully_connected(inputs=self.dense1, num_outputs=100)
+        #state_shape: (None, 5, state_size)
+        self.state_dense1 = nn.Linear(self.state, 64)
+        self.state_dense2 = nn.Linear(64, 10)
 
-            self.state = tf.placeholder(shape=[None, 5, self.state_size],
-                                        dtype=tf.float32, name='state')
+        sefl.rnn_cell = nn.LSTM(110, 100, batch_size=False)
 
-            self.dense3 = tf.contrib.layers.fully_connected(inputs=self.state, num_outputs=64)
-            #self.dense3_5 = tf.contrib.layers.fully_connected(inputs=self.state, num_outputs=64)
-            self.dense4 = tf.contrib.layers.fully_connected(inputs=self.dense3, num_outputs=10)
+        self.output = nn.Linear(5*110, self.action_size)
 
-            if target is not None:
-                self.final_state = tf.identity(self.dense4)
-            else:
-                self.final_state = tf.concat([self.dense4, self.dense2], axis=2)
+        self.optimizer = optimizer.Adam(self.parameters(), lr=0.001)
 
-            self.rnn_cell = tf.contrib.rnn.BasicLSTMCell(110)
-            self.initial_state = self.rnn_cell.zero_state(batch_size=1, dtype=tf.float32)
-            self.rnn_outputs, state = tf.nn.dynamic_rnn(self.rnn_cell, self.final_state, initial_state=self.initial_state)
-            self.rnn_outputs = tf.reshape(self.rnn_outputs, [-1, 5 * 110])
+    def forward(self, state, local_maps=None):
+        """
+        state:
+            target_mode=False -> (batch, 5, state_size)
+            target_mode=True  -> (batch, state_size)
 
-            #self.dense6 = tf.contrib.layers.fully_connected(inputs=self.rnn_outputs, num_outputs=64)
+        local_map:
+            (batch, 5, 625)
+        """
+        if self.target_mode:
+            x = F.relu(self.state_dense1(state))
+            x = F.relu(self.state_dense2(x))
+            return self.output(x)
 
-            self.output = tf.contrib.layers.fully_connected(inputs=self.rnn_outputs, num_outputs=4)
+        # Possible Model Improvement area: change the local map model into a CNN or something else with spatial encoding. --Andrew Chang, Feb 25 2026
+        
+        flattened_lm = torch.flatten(local_maps)
+        lm = F.relu(self.lm_dense1(flattened_lm))
+        lm = F.relu(self.lm_dense2(lm))
 
+        s = F.relu(self.state_dense1(state))
+        s = F.relu(self.state_dense2(s))
 
-            self.action_probs = tf.squeeze(tf.nn.softmax(self.output))
-            #End of predict step
+        x = torch.concat((s, lm), dim=2) # (batch, 5, 110)
 
-            #Start of update step
-            self.action = tf.placeholder(tf.int32, name='action')
-            self.target = tf.placeholder(tf.float32, name='target')
+        rnn_out, (h_n, c_n) = self.rnn_cell(x)
+        rnn_out = rnn_out.reshape(rnn_out.size(0), -1)
 
-            self.picked_action_prob = tf.gather(self.action_probs, self.action)
-            self.picked_action_prob = tf.cond(self.picked_action_prob < 1e-30, lambda: tf.constant(1e-30), lambda: tf.identity(self.picked_action_prob))
+        output = self.output(rnn_out)
 
-            self.loss = -tf.log(self.picked_action_prob) * self.target
+        action_probs = torch.softmax(output)
+        action_probs = torch.squeeze(output)
 
-            self.optimizer = tf.train.AdamOptimizer(learning_rate=0.00001)
-            self.train_op = self.optimizer.minimize(self.loss)
-
-
-            self.saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=scope), max_to_keep=20)
-
-            #if self.args.test:
-                #self.saver.restore(sess, self.args.weight_dir + policy_weight)
-
-
-
+        return action_probs 
 
     def predict(self, states, local_map, sess=None):
-        sess = sess or tf.get_default_session() or self.sess
-        return sess.run(self.action_probs, {self.state: states, self.local_map: local_map})
+        self.eval()
+        with torch.no_grad():
+            state = torch.FloatTensor(state).to(self.device)
+            if local_map is not None:
+                local_map = torch.FloatTensor(local_map).to(self.device)
+                action_probs = self.forward(state, local_map)
+            else:
+                action_probs = self.forward(state)
+        return action_probs.cpu().numpy()
 
-    def update(self, states, target, action, local_map, sess=None):
-        sess = sess or tf.get_default_session() or self.sess
+    def update(self, state, target, local_maps=None):
+        self.train()
+        state = torch.FloatTensor(state).to(self.device)
+        target = torch.FloatTensor(target).to(self.device)
 
-        feed_dict = {self.state: states, self.action: action, self.target: target, self.local_map: local_map}
-        _, loss = sess.run([self.train_op, self.loss], feed_dict=feed_dict)
+        if local_maps is not None:
+            local_map = torch.FloatTensor(local_map).to(self.device)
+            output = self.forward(state, local_map)
+        else:
+            output = self.forward(state)
 
+        loss = F.mse_loss(output, target)
 
-        return loss
-
-    def load_weights(self, name, sess):
-        self.saver.restore(sess, name)
-
-    def save_weights(self, name, sess, episode=None):
-        self.saver.save(sess, name, global_step=episode)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
 
 
 
 class ValueEstimator_RNN:
-    def __init__(self, state_size, action_size, scope='RNN_model_value', sess=None, target=None):
+    def __init__(self, state_size, action_size, target=None):
         self.state_size = state_size
         self.action_size = action_size
-        self.sess = sess or tf.get_default_session()
-        with tf.variable_scope(scope):
-            self.local_map = tf.placeholder(shape=[None, 5, 625], dtype=tf.float32, name='local_map')
+        self.target_mode = (target is not None)
 
-            self.dense1 = tf.contrib.layers.fully_connected(inputs=self.local_map, num_outputs=100)
-            self.dense2 = tf.contrib.layers.fully_connected(inputs=self.dense1, num_outputs=100)
+        #local_map shape: (None, 5, 625)
+        self.lm_dense1 = nn.Linear(625*5, 100)
+        self.lm_dense2 = nn.Linear(100, 100)
 
-            self.state = tf.placeholder(shape=[None, 5, self.state_size],
-                                        dtype=tf.float32, name='state')
-            self.dense3 = tf.contrib.layers.fully_connected(inputs=self.state, num_outputs=64)
-            #self.dense3_5 = tf.contrib.layers.fully_connected(inputs=self.state, num_outputs=64)
-            self.dense4 = tf.contrib.layers.fully_connected(inputs=self.dense3, num_outputs=10)
+        #state_shape: (None, 5, state_size)
+        self.state_dense1 = nn.Linear(self.state, 64)
+        self.state_dense2 = nn.Linear(64, 10)
 
-            if target is not None:
-                self.final_state = tf.identity(self.dense4)
+        sefl.rnn_cell = nn.LSTM(110, 100, batch_size=False)
+
+        self.output = nn.Linear(5*110, 1)
+
+        self.optimizer = optimizer.Adam(self.parameters(), lr=0.001)
+
+    def forward(self, states, local_maps):
+        """
+        state:
+            target_mode=False -> (batch, 5, state_size)
+            target_mode=True  -> (batch, state_size)
+
+        local_map:
+            (batch, 5, 625)
+        """
+        if self.target_mode:
+            x = F.relu(self.state_dense1(state))
+            x = F.relu(self.state_dense2(x))
+            return self.output(x)
+
+        # Possible Model Improvement area: change the local map model into a CNN or something else with spatial encoding. --Andrew Chang, Feb 25 2026
+        
+        flattened_lm = torch.flatten(local_maps)
+        lm = F.relu(self.lm_dense1(flattened_lm))
+        lm = F.relu(self.lm_dense2(lm))
+
+        s = F.relu(self.state_dense1(state))
+        s = F.relu(self.state_dense2(s))
+
+        x = torch.concat((s, lm), dim=2) # (batch, 5, 110)
+
+        rnn_out, (h_n, c_n) = self.rnn_cell(x)
+        rnn_out = rnn_out.reshape(rnn_out.size(0), -1)
+
+        output = self.output(rnn_out)
+
+        value_estimate = torch.squeeze(output)
+        return value_estimate 
+
+    def predict(self, states, target, local_maps):
+        self.eval()
+        with torch.no_grad():
+            state = torch.FloatTensor(state).to(self.device)
+            if local_map is not None:
+                local_map = torch.FloatTensor(local_map).to(self.device)
+                value_estimate = self.forward(state, local_map)
             else:
-                self.final_state = tf.concat([self.dense4, self.dense2], axis=2)
+                value_estimate = self.forward(state)
+        return value_estimate.cpu().numpy()
 
-            self.rnn_cell = tf.contrib.rnn.BasicLSTMCell(110)
-            self.initial_state = self.rnn_cell.zero_state(batch_size=1, dtype=tf.float32)
-            self.rnn_outputs, state = tf.nn.dynamic_rnn(self.rnn_cell, self.final_state, initial_state=self.initial_state)
-            self.rnn_outputs = tf.reshape(self.rnn_outputs, [-1, 5 * 110])
+    def update(self, state, target, local_maps=None):
+        self.train()
+        state = torch.FloatTensor(state).to(self.device)
+        target = torch.FloatTensor(target).to(self.device)
 
-            #self.dense6 = tf.contrib.layers.fully_connected(inputs=self.rnn_outputs, num_outputs=64)
+        if local_maps is not None:
+            local_map = torch.FloatTensor(local_map).to(self.device)
+            value_estimate = self.forward(state, local_map)
+        else:
+            value_estimate = self.forward(state)
 
-            self.output = tf.contrib.layers.fully_connected(inputs=self.rnn_outputs, num_outputs=1)
+        loss = F.mse_loss(output, target)
 
-            self.value_estimate = tf.squeeze(self.output)
-            #End of predict step
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
 
-            #Start of update step
-            self.target = tf.placeholder(tf.float32, name='target')
-
-            self.loss = tf.squared_difference(self.value_estimate, self.target)
-
-            self.optimizer = tf.train.AdamOptimizer(learning_rate=0.00001)
-            self.train_op = self.optimizer.minimize(self.loss)
-
-            self.saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=scope), max_to_keep=10)
-            #if self.args.test:
-                #self.saver.restore(sess, self.args.weight_dir + value_weight)
-
-    def predict(self, states, local_maps, sess=None):
-        sess = sess or tf.get_default_session() or self.sess
-        return sess.run(self.value_estimate, {self.state: states, self.local_map: local_maps})
-
-    def update(self, states, target, local_maps, sess=None):
-        sess = sess or tf.get_default_session() or self.sess
-        feed_dict = {self.state: states, self.target: target, self.local_map: local_maps}
-        _, loss = sess.run([self.train_op, self.loss], feed_dict)
-
-        return loss
-
-    def load_weights(self, name, sess):
-        self.saver.restore(sess, name)
-
-    def save_weights(self, name, sess, episode=None):
-        self.saver.save(sess, name, global_step=episode)
 
 class A2CAgent:
-    def __init__(self, state_size, action_size, scope, session, target=None):
+    def __init__(self, state_size, action_size, target=None):
         self.state_size = state_size
-        self.policy = PolicyEstimator_RNN(state_size, action_size, scope + '_policy', session, target)
-        self.value = ValueEstimator_RNN(state_size, action_size, scope + '_value', session, target)
+        self.policy = PolicyEstimator_RNN(state_size, action_size, target)
+        self.value = ValueEstimator_RNN(state_size, action_size, target)
         self.sess = session
         self.memory = deque(maxlen=2000)
-        self.load_weight_dir = 'Weights/'
-        self.save_weight_dir = 'Weights_save/'
 
     def act(self, state, local_map):
         action_probs = self.policy.predict(state, local_map, self.sess)
@@ -174,10 +202,8 @@ class A2CAgent:
         self.policy.update(states, pol_target, action, local_maps)
         self.value.update(states, val_target, local_maps)
 
-    def load(self, name, name2):
-        self.policy.load_weights(self.load_weight_dir + name, self.sess)
-        self.value.load_weights(self.load_weight_dir + name2, self.sess)
+    def load(self, name, name2):# Why are there two names???
+        #TODO: Actually implement this method.
 
-    def save(self, name, name2, episode=None):
-        self.policy.save_weights(self.save_weight_dir + name, self.sess, episode)
-        self.value.save_weights(self.save_weight_dir + name2, self.sess, episode)
+    def save(self, name, name2, episode=None):# Why are there two names???
+        #TODO: Actually implement this method.
