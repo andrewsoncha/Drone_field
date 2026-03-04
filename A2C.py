@@ -24,7 +24,7 @@ class PolicyEstimator_RNN(nn.Module):
         self.device = device
 
         #local_map shape: (None, 5, 625)
-        self.lm_dense1 = nn.Linear(625*5, 100)
+        self.lm_dense1 = nn.Linear(625, 100)
         self.lm_dense2 = nn.Linear(100, 100)
 
         #state_shape: (None, 5, state_size)
@@ -33,7 +33,8 @@ class PolicyEstimator_RNN(nn.Module):
 
         self.rnn_cell = nn.LSTM(110, 100)
 
-        self.output = nn.Linear(5*110, self.action_size)
+        self.output = nn.Linear(5*100, self.action_size)
+        self.action_probs = nn.Softmax(dim=1)
 
         self.optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
 
@@ -53,29 +54,33 @@ class PolicyEstimator_RNN(nn.Module):
 
         # Possible Model Improvement area: change the local map model into a CNN or something else with spatial encoding. --Andrew Chang, Feb 25 2026
 
-        flattened_lm = torch.flatten(local_maps)
-        lm = F.relu(self.lm_dense1(flattened_lm))
+        lm = F.relu(self.lm_dense1(local_maps))
         lm = F.relu(self.lm_dense2(lm))
 
         s = F.relu(self.state_dense1(state))
         s = F.relu(self.state_dense2(s))
 
+        print('states shape:', s.shape)
+        print('local_maps shape:', lm.shape)
         x = torch.concat((s, lm), dim=2) # (batch, 5, 110)
 
         rnn_out, (h_n, c_n) = self.rnn_cell(x)
         rnn_out = rnn_out.reshape(rnn_out.size(0), -1)
 
+        print('rnn_out shape:', rnn_out.shape)
         output = self.output(rnn_out)
 
-        action_probs = torch.softmax(output)
-        action_probs = torch.squeeze(output)
+        print('output shape:',output.shape)
+        action_probs = self.action_probs(output)
+        action_probs = torch.squeeze(action_probs)
+        print('action_probs: ', action_probs)
 
         return action_probs 
 
     def predict(self, states, local_map, sess=None):
         self.eval()
         with torch.no_grad():
-            state = torch.FloatTensor(state).to(self.device)
+            state = torch.FloatTensor(states).to(self.device)
             if local_map is not None:
                 local_map = torch.FloatTensor(local_map).to(self.device)
                 action_probs = self.forward(state, local_map)
@@ -194,7 +199,8 @@ class A2CAgent:
         self.memory = deque(maxlen=2000)
 
     def act(self, state, local_map):
-        action_probs = self.policy.predict(state, local_map, self.sess)
+        action_probs = self.policy.predict(state, local_map)
+        print('action_probs:',action_probs)
         action = np.random.choice(np.arange(len(action_probs)), p=action_probs)
         return action
 

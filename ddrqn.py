@@ -58,8 +58,7 @@ class DDRQNModel(nn.Module):
             return self.output(x)
 
         # Possible Model Improvement area: change the local map model into a CNN or something else with spatial encoding. --Andrew Chang, Feb 25 2026
-        flattened_lm = torch.flatten(local_maps)
-        lm = F.relu(self.lm_dense1(flattened_lm))
+        lm = F.relu(self.lm_dense1(local_maps))
         lm = F.relu(self.lm_dense2(lm))
 
         s = F.relu(self.state_dense1(state))
@@ -76,8 +75,8 @@ class DDRQNModel(nn.Module):
         self.eval()
         with torch.no_grad():
             state = torch.FloatTensor(state).to(self.device)
-            if local_map is not None:
-                local_map = torch.FloatTensor(local_map).to(self.device)
+            if local_maps is not None:
+                local_map = torch.FloatTensor(local_maps).to(self.device)
                 q_values = self.forward(state, local_map)
             else:
                 q_values = self.forward(state)
@@ -174,6 +173,7 @@ class DDRQNAgent:
     def act(self, state, local_maps=None):
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
+        print(local_maps.shape)
         act_values = self.model.predict(state, local_maps)
         return np.argmax(act_values[0])  # returns action
 
