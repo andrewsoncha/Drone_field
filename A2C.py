@@ -60,20 +60,15 @@ class PolicyEstimator_RNN(nn.Module):
         s = F.relu(self.state_dense1(state))
         s = F.relu(self.state_dense2(s))
 
-        print('states shape:', s.shape)
-        print('local_maps shape:', lm.shape)
         x = torch.concat((s, lm), dim=2) # (batch, 5, 110)
 
         rnn_out, (h_n, c_n) = self.rnn_cell(x)
         rnn_out = rnn_out.reshape(rnn_out.size(0), -1)
 
-        print('rnn_out shape:', rnn_out.shape)
         output = self.output(rnn_out)
 
-        print('output shape:',output.shape)
         action_probs = self.action_probs(output)
         action_probs = torch.squeeze(action_probs)
-        print('action_probs: ', action_probs)
 
         return action_probs 
 
@@ -104,6 +99,9 @@ class PolicyEstimator_RNN(nn.Module):
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+    def save_weights(self, name):
+        torch.save(self.state_dict(), name)
 
 
 
@@ -190,6 +188,8 @@ class ValueEstimator_RNN(nn.Module):
         loss.backward()
         self.optimizer.step()
 
+    def save_weights(self, name):
+        torch.save(self.state_dict(), name)
 
 class A2CAgent:
     def __init__(self, state_size, action_size, target=None):
@@ -200,7 +200,6 @@ class A2CAgent:
 
     def act(self, state, local_map):
         action_probs = self.policy.predict(state, local_map)
-        print('action_probs:',action_probs)
         action = np.random.choice(np.arange(len(action_probs)), p=action_probs)
         return action
 
@@ -211,12 +210,11 @@ class A2CAgent:
         self.policy.update(states, pol_target, action, local_maps)
         self.value.update(states, val_target, local_maps)
 
-    def load(self, name, name2):
-        # Why are there two names???
-        #TODO: Actually implement this method.
-        print('A2CAgent load called! This method is not actually defined yet.')
+    def load(self, policy_name, value_name):
+        self.policy = torch.load(policy_name)
+        self.value = torch.load(value_name)
 
-    def save(self, name, name2, episode=None):
-        # Why are there two names???
-        #TODO: Actually implement this method.
-        print('A2CAgent save called! This method is not actually defined yet.')
+    def save(self, policy_name, value_name, episode=None):
+        self.policy.save_weights(policy_name)
+        self.value.save_weights(value_name)
+

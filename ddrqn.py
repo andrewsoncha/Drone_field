@@ -173,7 +173,6 @@ class DDRQNAgent:
     def act(self, state, local_maps=None):
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
-        print(local_maps.shape)
         act_values = self.model.predict(state, local_maps)
         return np.argmax(act_values[0])  # returns action
 
