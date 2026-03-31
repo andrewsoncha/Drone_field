@@ -42,7 +42,7 @@ class DDRQNModel(nn.Module):
 
         self.optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
 
-    def forward(self, state, local_maps=None):
+    def forward(self, states, local_maps=None):
         """
         state:
             target_mode=False -> (batch, 5, state_size)
@@ -53,45 +53,61 @@ class DDRQNModel(nn.Module):
         """
 
         if self.target_mode:
-            x = F.relu(self.state_dense1(state))
+            x = F.relu(self.state_dense1(states))
             x = F.relu(self.state_dense2(x))
             return self.output(x)
 
+        '''
+        print('state shape:',states.shape)
+        print('local_map shape:',local_maps.shape)
+        '''
         # Possible Model Improvement area: change the local map model into a CNN or something else with spatial encoding. --Andrew Chang, Feb 25 2026
         lm = F.relu(self.lm_dense1(local_maps))
         lm = F.relu(self.lm_dense2(lm))
 
-        s = F.relu(self.state_dense1(state))
+        s = F.relu(self.state_dense1(states))
         s = F.relu(self.state_dense2(s))
+
+        '''
+        print('s shape:', s.shape)
+        print('lm shape:',lm.shape)
+        '''
 
         x = torch.concat((s, lm), dim=2) # (batch, 5, 110)
 
         rnn_out, (h_n, c_n) = self.rnn_cell(x)
         rnn_out = rnn_out.reshape(rnn_out.size(0), -1)
+        # print('rnn_out.size:  ', rnn_out.shape)
 
         return self.output(rnn_out)
 
-    def predict(self, state, local_maps=None):
+    def predict(self, states, local_maps=None):
         self.eval()
         with torch.no_grad():
-            state = torch.FloatTensor(state).to(self.device)
+            states = torch.FloatTensor(states).to(self.device)
             if local_maps is not None:
                 local_map = torch.FloatTensor(local_maps).to(self.device)
-                q_values = self.forward(state, local_map)
+                q_values = self.forward(states, local_map)
             else:
                 q_values = self.forward(state)
         return q_values.cpu().numpy()
 
-    def fit(self, state, target, local_maps=None):
+    def fit(self, states, target, local_maps=None):
         self.train()
-        state = torch.FloatTensor(state).to(self.device)
+        states = torch.FloatTensor(states).to(self.device)
         target = torch.FloatTensor(target).to(self.device)
 
+        '''
+        print('states shape:', states.shape)
+        print('target shape:', target.shape)
+        print('local_maps shape:', local_maps.shape)
+        '''
+
         if local_maps is not None:
-            local_map = torch.FloatTensor(local_map).to(self.device)
-            output = self.forward(state, local_map)
+            local_maps = torch.FloatTensor(local_maps).to(self.device)
+            output = self.forward(states, local_maps)
         else:
-            output = self.forward(state)
+            output = self.forward(states)
 
         loss = F.mse_loss(output, target)
 
@@ -140,6 +156,7 @@ class DDRQNAgent:
     def replay(self, batch_size):
         minibatch = random.sample(self.memory, batch_size)
         if self.isTarget:
+            print('Agent is in Target Mode!')
             for state, local_map, action, reward, next_state, next_local_map, done in minibatch:
                 target = self.model.predict(state)
                 target_next = self.model.predict(next_state)
@@ -156,10 +173,14 @@ class DDRQNAgent:
 
 
         else:
+            print('Agent is not in Target Mode!')
             for state, local_map, action, reward, next_state, next_local_map, done in minibatch:
                 target = self.model.predict(state, local_map)
+                # print('target:', target)
                 target_next = self.model.predict(next_state, next_local_map)
+                # print('target_next:', target_next)
                 target_val = self.target_model.predict(next_state, next_local_map)
+                # print('target_val:', target_val)
                 if done:
                     target[0][action] = reward
                 else:
