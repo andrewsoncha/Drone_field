@@ -72,7 +72,7 @@ class PolicyEstimator_RNN(nn.Module):
 
         return action_probs 
 
-    def predict(self, states, local_map, sess=None):
+    def predict(self, states, local_map):
         self.eval()
         with torch.no_grad():
             state = torch.FloatTensor(states).to(self.device)
@@ -160,7 +160,7 @@ class ValueEstimator_RNN(nn.Module):
         value_estimate = torch.squeeze(output)
         return value_estimate 
 
-    def predict(self, states, target, local_maps):
+    def predict(self, states, local_maps):
         self.eval()
         with torch.no_grad():
             state = torch.FloatTensor(state).to(self.device)
@@ -206,9 +206,69 @@ class A2CAgent:
     def memorize(self, state, local_map, action, reward, next_state, next_local_map, done):
         self.memory.append((state, local_map, action, reward, next_state, next_local_map, done))
 
-    def update(self, states, local_maps, pol_target, val_target, action):
-        self.policy.update(states, pol_target, action, local_maps)
-        self.value.update(states, val_target, local_maps)
+# GPT Generated. Comment of Shame. --Andrew Chang, April 5th, 2026
+    def replay(self, batch_size, gamma=0.99):
+        minibatch = list(self.memory)[-batch_size:]
+
+        states = []
+        local_maps = []
+        actions = []
+        rewards = []
+        next_states = []
+        next_local_maps = []
+        dones = []
+
+        for state, local_map, action, reward, next_state, next_local_map, done in minibatch:
+            states.append(state)
+            local_maps.append(local_map)
+            actions.append(action)
+            rewards.append(reward)
+            next_states.append(next_state)
+            next_local_maps.append(next_local_map)
+            dones.append(done)
+
+        # Convert to tensors
+        states = torch.FloatTensor(states)
+        local_maps = torch.FloatTensor(local_maps)
+        next_states = torch.FloatTensor(next_states)
+        next_local_maps = torch.FloatTensor(next_local_maps)
+        actions = torch.LongTensor(actions)
+        rewards = torch.FloatTensor(rewards)
+        dones = torch.FloatTensor(dones)
+
+        # ---- Critic values ----
+        values = self.value.forward(states, local_maps)
+        next_values = self.value.forward(next_states, next_local_maps).detach()
+
+        # ---- Compute targets ----
+        targets = rewards + gamma * next_values * (1 - dones)
+
+        # ---- Advantage ----
+        advantages = targets - values
+
+        # ---- Actor loss ----
+        action_probs = self.policy.forward(states, local_maps)
+        dist = torch.distributions.Categorical(action_probs)
+        log_probs = dist.log_prob(actions)
+
+        actor_loss = -(log_probs * advantages.detach()).mean()
+
+        # ---- Critic loss ----
+        critic_loss = F.mse_loss(values, targets.detach())
+
+        # ---- Total loss ----
+        loss = actor_loss + critic_loss
+
+        # ---- Backprop ----
+        self.policy.optimizer.zero_grad()
+        self.value.optimizer.zero_grad()
+
+        loss.backward()
+
+        self.policy.optimizer.step()
+        self.value.optimizer.step()
+
+        return loss.item()
 
     def load(self, policy_name, value_name):
         self.policy = torch.load(policy_name)

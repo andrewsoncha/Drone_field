@@ -156,7 +156,7 @@ class DDRQNAgent:
     def replay(self, batch_size):
         minibatch = random.sample(self.memory, batch_size)
         if self.isTarget:
-            print('Agent is in Target Mode!')
+            # print('Agent is in Target Mode!')
             for state, local_map, action, reward, next_state, next_local_map, done in minibatch:
                 target = self.model.predict(state)
                 target_next = self.model.predict(next_state)
@@ -173,7 +173,7 @@ class DDRQNAgent:
 
 
         else:
-            print('Agent is not in Target Mode!')
+            # print('Agent is not in Target Mode!')
             for state, local_map, action, reward, next_state, next_local_map, done in minibatch:
                 target = self.model.predict(state, local_map)
                 # print('target:', target)
@@ -190,6 +190,7 @@ class DDRQNAgent:
                 self.model.fit(state, target, local_map)
             if self.epsilon > self.epsilon_min:
                 self.epsilon *= self.epsilon_decay
+        self.update_target_model()
 
     def act(self, state, local_maps=None):
         if np.random.rand() <= self.epsilon:
@@ -211,9 +212,9 @@ class DDRQNAgent:
             os.makedirs(self.temp_weight_dir)
 
     def load(self, name, name2):
-        self.model.load_weights(self.load_weight_dir + name, self.sess)
-        self.target_model.load_weights(self.load_weight_dir + name2, self.sess)
+        self.model.load(self.load_weight_dir + name)
+        self.target_model.load(self.load_weight_dir + name2)
 
     def save(self, name, name2, episode=None):
-        self.model.save_weights(self.save_weight_dir + name, self.sess, episode)
-        self.target_model.save_weights(self.save_weight_dir + name2, self.sess, episode)
+        self.model.save_weights(self.save_weight_dir + name)
+        self.target_model.save_weights(self.save_weight_dir + name2)

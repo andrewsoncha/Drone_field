@@ -45,7 +45,7 @@ class Search(Env):
         self.__class__.row_position = row
         self.__class__.col_position = col
         self.current_target = self.targets[self.__class__.current_target_index]
-        print(self.current_target)
+        # print(self.current_target)
 
         # Get new local map
         self.next_local_map()
@@ -235,7 +235,7 @@ class Search(Env):
 
         if row and col:
             target = True
-            print(self.current_target, 'reached')
+            #print(self.current_target, 'reached')
 
         return target
 
@@ -262,6 +262,7 @@ class Search(Env):
         """
         if self.__class__.row_position == self.local_target[0] and self.__class__.col_position == self.local_target[1]:
             target = True
+        # print((self.__class__.row_position, self.__class__.col_position), '   local_target_reached: ', target)
 
         return target
 

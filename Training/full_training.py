@@ -114,17 +114,13 @@ def train_full_model(target_cost=False, search_weights=None, trace_weights=None,
                           trace.row_position, trace.col_position, steps))
 
             search_episode_num += 1
-            t += steps
-            next_target = target.select_next_target(trace.row_position, trace.col_position)
-            searching_agent.replay(5 if len(searching_agent.memory)>5 else len(searching_agent.memory))
-            search.update_target(next_target)
-            search.transfer_map(trace.map)
-            '''
-            print("Next target:", next_target)
-            '''
 
-            # Not doing Tracing for now
-            '''
+            # Train Searching Agent
+            searching_agent.replay(5 if len(searching_agent.memory)>5 else len(searching_agent.memory))
+
+            if search_episode_num % 100 == 0:
+                searching_agent.save('model.pt', 'targetModel.pt')
+
             # Update all environments with the new information after the search episode
             trace.update_visited(search.visited)
             trace.transfer_map(search.map)
@@ -158,15 +154,13 @@ def train_full_model(target_cost=False, search_weights=None, trace_weights=None,
                   .format((trace_episode_num+1 % (e+1)), e+1, reward, trace_covered[trace_episode_num],
                           search.row_position, search.col_position, steps))
 
+            # Train Tracing Agent
+            searching_agent.replay(5 if len(searching_agent.memory)>5 else len(searching_agent.memory))
+
             trace_episode_num += 1
             t += steps
 
-            # Train the model
-            searching_agent.replay(16 if len(searching_agent.memory)>16 else )
-
             # Update all environments with the new information after the trace episode
-            search.update_visited(trace.visited)
-            search.transfer_map(trace.map)
             target.update_visited(trace.visited)
             target.transfer_map(trace.map)
 
@@ -176,11 +170,9 @@ def train_full_model(target_cost=False, search_weights=None, trace_weights=None,
 
 
             # Update all environments with the new target
-            search.update_target(next_target)
             trace.update_target(next_target)
             target.update_target(next_target)
             print("Next target:", next_target)
-            '''
             
 
         total_steps.append(t)
@@ -194,4 +186,6 @@ def train_full_model(target_cost=False, search_weights=None, trace_weights=None,
         plt.ylabel('Total Steps Taken')
         plt.savefig('Training_results/steps.png')
         plt.clf()
+
+
 

@@ -107,6 +107,9 @@ def trace_episode(trace, tracing_agent, row_position, col_position, target=None)
             state=state, local_map=local_map, action=action, reward=reward, next_state=next_state,
             next_local_map=next_local_map, done=done))
 
+        if time >= 5:
+            next_states, next_local_maps = get_last_t_states(5, episode, trace.vision_size + 4)
+
         state = next_state
         local_map = next_local_map
 
@@ -124,7 +127,8 @@ def trace_episode(trace, tracing_agent, row_position, col_position, target=None)
 
         t = time
 
-    #print("End Trace: {}".format(np.sum(trace.visited)))
+        if time >= 5:
+            tracing_agent.memorize(states, local_maps, action, reward, next_states, next_local_maps, done)
 
     return total_reward, t, trace.row_position, trace.col_position
 
