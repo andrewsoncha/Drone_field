@@ -128,6 +128,8 @@ def trace_episode(trace, tracing_agent, row_position, col_position, target=None)
         t = time
 
         if time >= 5:
+            # print('states shape:',states.shape)
+            # print('local_maps shape:',local_maps.shape)
             tracing_agent.memorize(states, local_maps, action, reward, next_states, next_local_maps, done)
 
     return total_reward, t, trace.row_position, trace.col_position

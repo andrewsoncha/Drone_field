@@ -155,7 +155,7 @@ def train_full_model(target_cost=False, search_weights=None, trace_weights=None,
                           search.row_position, search.col_position, steps))
 
             # Train Tracing Agent
-            searching_agent.replay(5 if len(searching_agent.memory)>5 else len(searching_agent.memory))
+            tracing_agent.replay(5 if len(tracing_agent.memory)>5 else len(tracing_agent.memory))
 
             trace_episode_num += 1
             t += steps

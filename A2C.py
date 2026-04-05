@@ -114,7 +114,7 @@ class ValueEstimator_RNN(nn.Module):
         self.device = device
 
         #local_map shape: (None, 5, 625)
-        self.lm_dense1 = nn.Linear(625*5, 100)
+        self.lm_dense1 = nn.Linear(625, 100)
         self.lm_dense2 = nn.Linear(100, 100)
 
         #state_shape: (None, 5, state_size)
@@ -123,7 +123,7 @@ class ValueEstimator_RNN(nn.Module):
 
         self.rnn_cell = nn.LSTM(110, 100)
 
-        self.output = nn.Linear(5*110, 1)
+        self.output = nn.Linear(5*100, 1)
 
         self.optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
 
@@ -143,12 +143,15 @@ class ValueEstimator_RNN(nn.Module):
 
         # Possible Model Improvement area: change the local map model into a CNN or something else with spatial encoding. --Andrew Chang, Feb 25 2026
 
-        flattened_lm = torch.flatten(local_maps)
-        lm = F.relu(self.lm_dense1(flattened_lm))
+        lm = F.relu(self.lm_dense1(local_maps))
+        # print(lm.shape)
         lm = F.relu(self.lm_dense2(lm))
 
-        s = F.relu(self.state_dense1(state))
+        # print(states.shape)
+        s = F.relu(self.state_dense1(states))
+        # print(s.shape)
         s = F.relu(self.state_dense2(s))
+        # print(s.shape)
 
         x = torch.concat((s, lm), dim=2) # (batch, 5, 110)
 
@@ -210,63 +213,45 @@ class A2CAgent:
     def replay(self, batch_size, gamma=0.99):
         minibatch = list(self.memory)[-batch_size:]
 
-        states = []
-        local_maps = []
-        actions = []
-        rewards = []
-        next_states = []
-        next_local_maps = []
-        dones = []
-
         for state, local_map, action, reward, next_state, next_local_map, done in minibatch:
-            states.append(state)
-            local_maps.append(local_map)
-            actions.append(action)
-            rewards.append(reward)
-            next_states.append(next_state)
-            next_local_maps.append(next_local_map)
-            dones.append(done)
+            state = torch.FloatTensor(state)
+            local_map = torch.FloatTensor(local_map)
+            action = torch.FloatTensor(action)
+            # reward = torch.FloatTensor(reward)
+            next_state = torch.FloatTensor(next_state)
+            next_local_map = torch.FloatTensor(next_local_map)
 
-        # Convert to tensors
-        states = torch.FloatTensor(states)
-        local_maps = torch.FloatTensor(local_maps)
-        next_states = torch.FloatTensor(next_states)
-        next_local_maps = torch.FloatTensor(next_local_maps)
-        actions = torch.LongTensor(actions)
-        rewards = torch.FloatTensor(rewards)
-        dones = torch.FloatTensor(dones)
+            # ---- Critic values ----
+            pred_value = self.value.forward(state, local_map)
+            next_value = self.value.forward(next_state, next_local_map).detach()
 
-        # ---- Critic values ----
-        values = self.value.forward(states, local_maps)
-        next_values = self.value.forward(next_states, next_local_maps).detach()
+            # ---- Compute targets ----
+            target = reward + gamma * next_value * (1 - done)
 
-        # ---- Compute targets ----
-        targets = rewards + gamma * next_values * (1 - dones)
+            # ---- Advantage ----
+            advantage = target - pred_value
 
-        # ---- Advantage ----
-        advantages = targets - values
+            # ---- Actor loss ----
+            action_probs = self.policy.forward(state, local_map)
+            dist = torch.distributions.Categorical(action_probs)
+            log_probs = dist.log_prob(action)
 
-        # ---- Actor loss ----
-        action_probs = self.policy.forward(states, local_maps)
-        dist = torch.distributions.Categorical(action_probs)
-        log_probs = dist.log_prob(actions)
+            actor_loss = -(log_probs * advantage.detach()).mean()
 
-        actor_loss = -(log_probs * advantages.detach()).mean()
+            # ---- Critic loss ----
+            critic_loss = F.mse_loss(pred_value, target.detach())
 
-        # ---- Critic loss ----
-        critic_loss = F.mse_loss(values, targets.detach())
+            # ---- Total loss ----
+            loss = actor_loss + critic_loss
 
-        # ---- Total loss ----
-        loss = actor_loss + critic_loss
+            # ---- Backprop ----
+            self.policy.optimizer.zero_grad()
+            self.value.optimizer.zero_grad()
 
-        # ---- Backprop ----
-        self.policy.optimizer.zero_grad()
-        self.value.optimizer.zero_grad()
+            loss.backward()
 
-        loss.backward()
-
-        self.policy.optimizer.step()
-        self.value.optimizer.step()
+            self.policy.optimizer.step()
+            self.value.optimizer.step()
 
         return loss.item()
 
